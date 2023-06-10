@@ -1,0 +1,132 @@
+SET SERVEROUTPUT ON
+
+-- Creación de tabla colaboradores
+CREATE TABLE COLABORADORES (
+    idColaborador NUMBER,
+    nombre VARCHAR2(25),
+    apellido VARCHAR2(25),
+    cedula VARCHAR2(10),
+    salarioMensual NUMBER(15,2),
+    fechaIngreso DATE,
+    status CHAR(1) check(status in('A', 'I', 'V')),
+    CONSTRAINT PK_COLABORADORES PRIMARY KEY (idColaborador)
+);
+
+-- Creación de la tabla PAGOQUINCENAL
+CREATE TABLE PAGOQUINCENAL (
+    idPago NUMBER,
+    idColaborador NUMBER,
+    salarioBruto NUMBER(15, 2),
+    salarioNeto NUMBER(15, 2),
+    seguroEducativo NUMBER(15, 2),
+    seguroSocial NUMBER(15, 2),
+    fechaPago DATE,
+    CONSTRAINT PK_PAGOQUINCENAL PRIMARY KEY (idPago),
+    CONSTRAINT FK_idColaborador FOREIGN KEY (idColaborador) REFERENCES COLABORADORES (idColaborador)
+);
+
+-- Creacion de procedimiento que carga la tabla colaboradores
+CREATE OR REPLACE PROCEDURE carga_colaboradores (
+    p_idColaborador COLABORADORES.idColaborador%type,
+    p_nombre COLABORADORES.nombre%type,
+    p_apellido COLABORADORES.apellido%type,
+    p_cedula COLABORADORES.cedula%type,
+    p_salarioMensual COLABORADORES.salarioMensual%type,
+    p_fechaIngreso COLABORADORES.fechaIngreso%type,
+    p_status COLABORADORES.status%type
+) AS
+BEGIN
+    INSERT INTO COLABORADORES (idColaborador, nombre, apellido, cedula, salarioMensual, fechaIngreso, status)
+    VALUES (p_idColaborador, p_nombre, p_apellido, p_cedula, p_salarioMensual, p_fechaIngreso, p_status);
+END carga_colaboradores;
+
+-- Invocación del procedimiento para cargar la tabla colaboradores
+BEGIN
+    carga_colaboradores(1, 'Alberto', 'Bellera', '20-70-6024', '3500', TO_DATE('23-07-2021', 'DD-MM-YYYY'), 'V');
+    carga_colaboradores(2, 'Samuel', 'Castro', '8-987-597', '4500', TO_DATE('02-12-2022', 'DD-MM-YYYY'), 'A');
+    carga_colaboradores(3, 'Alejandro', 'Silva', '20-69-420', '1000', TO_DATE('11-11-2020', 'DD-MM-YYYY'), 'I');
+    carga_colaboradores(4, 'Sofia', 'Gonzalez', '3-234-452', '2300', TO_DATE('12-02-2021', 'DD-MM-YYYY'), 'I');
+    carga_colaboradores(5, 'Pavel', 'Andrei', '9-434-4324', '6000', TO_DATE('05-03-2020', 'DD-MM-YYYY'), 'A');
+END;
+
+-- Creación de la función para calcular el salario quincenal
+CREATE OR REPLACE FUNCTION calcular_salario_quincenal (
+    p_salarioMensual COLABORADORES.salarioMensual%type,
+    p_status COLABORADORES.status%type
+)
+    RETURN NUMBER IS
+    v_salarioQuincenal NUMBER;
+BEGIN
+    IF p_status = 'A' THEN
+        v_salarioQuincenal := p_salarioMensual / 2;
+        RETURN v_salarioQuincenal;
+    ELSE
+        RETURN 'El colaborador está inactivo';
+    END IF;
+END calcular_salario_quincenal;
+
+-- Creación de la función para calcular el seguro educativo
+CREATE OR REPLACE FUNCTION calcular_seguro_educativo (
+    p_salarioQuincenal COLABORADORES.salarioMensual%type
+)
+    RETURN NUMBER IS
+    v_seguroEducativo NUMBER;
+BEGIN
+    v_seguroEducativo := p_salarioQuincenal * 0.0125;
+    RETURN v_seguroEducativo;
+END calcular_seguro_educativo;
+
+-- Creación de la función para calcular el seguro social
+CREATE OR REPLACE FUNCTION calcular_seguro_social (
+    p_salarioQuincenal COLABORADORES.salarioMensual%type
+)
+    RETURN NUMBER IS
+    v_seguroSocial NUMBER;
+BEGIN
+    v_seguroSocial := p_salarioQuincenal * 0.0975;
+    RETURN v_seguroSocial;
+END calcular_seguro_social;
+
+-- Creación de la función para calcular el salario neto quincenal
+CREATE OR REPLACE FUNCTION calcular_salario_neto_quincenal (
+    p_salarioQuincenal COLABORADORES.salarioMensual%type,
+    p_seguroEducativo COLABORADORES.salarioMensual%type,
+    p_seguroSocial COLABORADORES.salarioMensual%type
+)
+    RETURN NUMBER IS
+    v_salarioNetoQuincenal NUMBER;
+BEGIN
+    v_salarioNetoQuincenal := p_salarioQuincenal - p_seguroEducativo - p_seguroSocial;
+    RETURN v_salarioNetoQuincenal;
+END calcular_salario_neto_quincenal;
+
+-- Creación del procedimiento almacenado que realiza el cálculo del salario neto quincenal de cada colaborador y lo almacena en la tabla pagoquincenal
+CREATE OR REPLACE PROCEDURE carga_pago_quincenal AS
+    v_salarioQuincenal COLABORADORES.salarioMensual%type;
+    v_seguroEducativo COLABORADORES.salarioMensual%type;
+    v_seguroSocial COLABORADORES.salarioMensual%type;
+    v_salarioNetoQuincenal COLABORADORES.salarioMensual%type;
+    v_idPago NUMBER := 1;
+    CURSOR c_Colaboradores IS
+        SELECT idColaborador, salarioMensual, fechaIngreso, status
+        FROM COLABORADORES;
+BEGIN
+    FOR v_colaborador IN c_Colaboradores LOOP
+        IF v_colaborador.status = 'A' THEN
+            v_salarioQuincenal := calcular_salario_quincenal(v_colaborador.salarioMensual, v_colaborador.status);
+            v_seguroEducativo := calcular_seguro_educativo(v_salarioQuincenal);
+            v_seguroSocial := calcular_seguro_social(v_salarioQuincenal);
+            v_salarioNetoQuincenal := calcular_salario_neto_quincenal (v_salarioQuincenal, v_seguroEducativo, v_seguroSocial);
+            INSERT INTO PAGOQUINCENAL (idPago, idColaborador, salarioBruto, salarioNeto, seguroEducativo, seguroSocial, fechaPago)
+            VALUES (v_idPago, v_colaborador.idColaborador, v_salarioQuincenal, v_salarioNetoQuincenal, v_seguroEducativo, v_seguroSocial, v_colaborador.fechaIngreso);
+            v_idPago := v_idPago + 1;
+        ELSE
+            DBMS_OUTPUT.PUT_LINE('El colaborador no está activo.');
+        END IF;
+    END LOOP;
+END carga_pago_quincenal;
+
+-- Invocación del procedimiento para cargar la tabla pagoquincenal
+BEGIN
+    carga_pago_quincenal;
+END;
